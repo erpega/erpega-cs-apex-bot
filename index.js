@@ -8,7 +8,7 @@ const client = new Client({ intents: [ GatewayIntentBits.Guilds, GatewayIntentBi
 
 const TOKEN = process.env.TOKEN; const lobbies = new Map(); // textChannel.id -> lobbyData
 
-client.once("ready", () => { console.log(Bot is ready: ${client.user.tag}); });
+client.once("ready", () => { console.log(`Bot is ready: ${client.user.tag}`); });
 
 client.on("messageCreate", async (msg) => { if (msg.content === "!create-lobby-message") { const sent = await msg.channel.send( "Выберите игру, чтобы создать лобби:\n" + "🔫 — CS:GO (5 игроков)\n" + "⚔️ — Apex Legends (3 игрока)\n" + "🔮 — Dota 2 (5 игроков)" ); await sent.react("🔫"); await sent.react("⚔️"); await sent.react("🔮"); }
 
