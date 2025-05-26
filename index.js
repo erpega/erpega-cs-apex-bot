@@ -1,17 +1,12 @@
-// index.js
-const { Client, GatewayIntentBits, Partials, PermissionsBitField } = require("discord.js");
+const {
+  Client,
+  GatewayIntentBits,
+  Partials,
+  PermissionsBitField,
+} = require("discord.js");
 const express = require("express");
 const app = express();
-
-// Веб-сервер для UptimeRobot
-app.get("/", (req, res) => {
-  res.send("Bot is alive!");
-});
-
-const port = process.env.PORT || 3000;
-app.listen(port, () => {
-  console.log(`Web server started on port ${port}`);
-});
+require("dotenv").config();
 
 const client = new Client({
   intents: [
@@ -20,28 +15,31 @@ const client = new Client({
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMessageReactions
+    GatewayIntentBits.GuildMessageReactions,
   ],
-  partials: [Partials.Message, Partials.Channel, Partials.Reaction]
+  partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
-
-const TOKEN = process.env.TOKEN;
-if (!TOKEN) {
-  console.error("TOKEN не установлен в переменных окружения!");
-  process.exit(1);
-}
 
 const lobbies = new Map();
 
+// === Keep-alive for Render ===
+app.get("/", (req, res) => res.send("Bot is alive!"));
+app.listen(3000, () => console.log("Web server started"));
+
+// === When bot is ready ===
 client.once("ready", () => {
-  console.log(`Бот запущен: ${client.user.tag}`);
+  console.log(`Bot is ready: ${client.user.tag}`);
 });
 
+// === Commands ===
 client.on("messageCreate", async (msg) => {
+  if (msg.author.bot) return;
+
+  // !create-lobby-message
   if (msg.content === "!create-lobby-message") {
     const sent = await msg.channel.send(
       "**Выберите игру, чтобы создать лобби:**\n" +
-      "🔫 — CS2 (5 игроков)\n" +
+      "🔫 — CS 2 (5 игроков)\n" +
       "⚔️ — Apex Legends (3 игрока)\n" +
       "🔮 — Dota 2 (5 игроков)"
     );
@@ -50,6 +48,7 @@ client.on("messageCreate", async (msg) => {
     await sent.react("🔮");
   }
 
+  // !kick
   if (msg.content.startsWith("!kick")) {
     const creatorId = lobbies.get(msg.channel.id)?.owner;
     if (!creatorId || msg.author.id !== creatorId)
@@ -62,6 +61,7 @@ client.on("messageCreate", async (msg) => {
     await msg.channel.send(`${member.user.tag} был кикнут создателем.`);
   }
 
+  // !close
   if (msg.content === "!close") {
     const lobby = lobbies.get(msg.channel.id);
     if (!lobby) return msg.reply("Это не лобби.");
@@ -76,17 +76,49 @@ client.on("messageCreate", async (msg) => {
 
     lobbies.delete(msg.channel.id);
   }
+
+  // !help
+  if (msg.content === "!help") {
+    return msg.channel.send(
+      "**Список команд:**\n" +
+      "`!create-lobby-message` — отправить сообщение с выбором игры.\n" +
+      "`!kick @user` — кикнуть участника из голосового канала (только для создателя лобби).\n" +
+      "`!close` — закрыть свое лобби (удаляет каналы).\n" +
+      "`!lobbies` — показать информацию о текущих лобби.\n"
+    );
+  }
+
+  // !lobbies
+  if (msg.content === "!lobbies") {
+    if (!msg.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+      return msg.reply("Эта команда доступна только администраторам.");
+    }
+
+    if (lobbies.size === 0) {
+      return msg.channel.send("Сейчас нет активных лобби.");
+    }
+
+    let response = "**Активные лобби:**\n";
+    for (const [channelId, lobby] of lobbies) {
+      const user = await client.users.fetch(lobby.owner).catch(() => null);
+      response += `• Игра: ${lobby.limit === 3 ? "Apex Legends" : "CS 2 / Dota 2"}\n`;
+      response += `  Создатель: ${user ? user.tag : "неизвестно"}\n`;
+      response += `  Текст-канал: <#${lobby.textChannel}>\n`;
+      response += `  Голосовой: <#${lobby.voiceChannel}>\n\n`;
+    }
+
+    msg.channel.send(response);
+  }
 });
 
+// === Reaction handler: create lobby ===
 client.on("messageReactionAdd", async (reaction, user) => {
   if (user.bot) return;
-
   const { message } = reaction;
   if (!message.guild || !["🔫", "⚔️", "🔮"].includes(reaction.emoji.name)) return;
 
   const member = await message.guild.members.fetch(user.id);
 
-  // Проверка на существующее лобби у пользователя
   const existingLobby = [...lobbies.values()].find(lobby => lobby.owner === user.id);
   if (existingLobby) {
     return member.send("У тебя уже есть активное лобби. Используй `!close`, чтобы его закрыть.").catch(() => {});
@@ -96,7 +128,7 @@ client.on("messageReactionAdd", async (reaction, user) => {
   let limit = 0;
 
   if (reaction.emoji.name === "🔫") {
-    game = "CS:GO";
+    game = "CS 2";
     limit = 5;
   } else if (reaction.emoji.name === "⚔️") {
     game = "Apex Legends";
@@ -116,9 +148,9 @@ client.on("messageReactionAdd", async (reaction, user) => {
     permissionOverwrites: [
       {
         id: message.guild.id,
-        allow: [PermissionsBitField.Flags.Connect, PermissionsBitField.Flags.ViewChannel]
-      }
-    ]
+        allow: [PermissionsBitField.Flags.Connect, PermissionsBitField.Flags.ViewChannel],
+      },
+    ],
   });
 
   const text = await message.guild.channels.create({
@@ -128,22 +160,23 @@ client.on("messageReactionAdd", async (reaction, user) => {
     permissionOverwrites: [
       {
         id: message.guild.id,
-        allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages]
-      }
-    ]
+        allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages],
+      },
+    ],
   });
 
-  await text.send(`**${user.username}** создал лобби на ${limit} игроков (${game})!\n` +
-                  `Используй \`!kick @user\` или \`!close\` для управления.`);
+  await text.send(
+    `**${user.username}** создал лобби на ${limit} игроков (${game})!\n` +
+    `Используй \`!kick @user\` или \`!close\` для управления.`
+  );
 
   lobbies.set(text.id, {
     voiceChannel: voice.id,
     textChannel: text.id,
     owner: user.id,
-    limit: limit
+    limit: limit,
   });
 
-  // Проверка пустого голосового канала
   const interval = setInterval(async () => {
     const vChan = await message.guild.channels.fetch(voice.id).catch(() => null);
     const tChan = await message.guild.channels.fetch(text.id).catch(() => null);
@@ -157,6 +190,5 @@ client.on("messageReactionAdd", async (reaction, user) => {
   }, 15000);
 });
 
-client.login(TOKEN).catch(err => {
-  console.error("Не удалось залогиниться в Discord:", err);
-});
+// === Start the bot ===
+client.login(process.env.TOKEN);
